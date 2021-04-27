@@ -31,8 +31,11 @@ async def incoming_message(request: Request):
     incoming_message = dict(form_data)
 
     whatsapp_requests.insert_one(incoming_message)
-    print(message)
-    print("Incoming message: {}".format(incoming_msg))
+
+    try:
+        print("Incoming message: {}".format(incoming_message["message"]))
+    except Exception as e:
+        print(e)
 
     # Reponse for Whatsapp
     wa_response = {
