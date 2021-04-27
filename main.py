@@ -33,8 +33,8 @@ async def handle_request(request: Request):
     incoming_message = dict(form_data)
     print("incoming_request: {}".format(incoming_message))
 
-    whatsapp_requests.insert_one(incoming_message)
     prev_message_count = whatsapp_requests.count_documents({'From': incoming_message['From']})
+    whatsapp_requests.insert_one(incoming_message)
 
     # If this is the first message sent by the user then send him the introductory
     # message
