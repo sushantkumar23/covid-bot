@@ -29,6 +29,8 @@ async def incoming_message(request: Request):
 
     form_data = await request.form()
     incoming_message = dict(form_data)
+    print("type of incoming_message: {}".format(type(incoming_message)))
+    print("incoming_message: {}".format(incoming_message))
 
     whatsapp_requests.insert_one(incoming_message)
 
