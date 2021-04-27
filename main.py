@@ -10,6 +10,9 @@ auth_token = os.getenv("AUTH_TOKEN")
 client = Client(account_sid, auth_token)
 
 
+@app.get("/")
+    return "Hello World", 200
+
 @app.post("/incoming_message")
 def incoming_message(request: Request):
     incoming_msg = request.values.get('Body', '').lower()
