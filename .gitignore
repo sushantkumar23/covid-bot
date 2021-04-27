@@ -1,2 +1,4 @@
 # Environment files
 .env
+Pipfile
+Pipfile.lock
