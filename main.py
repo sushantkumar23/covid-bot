@@ -150,11 +150,4 @@ Any leads you share can help save many lives 🙏. Please join us to help India 
 
 @app.post("/status")
 def status(request: Request):
-    request_status = request.values.get("Body", '')
-    print(request_status)
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    return "Hello World"
