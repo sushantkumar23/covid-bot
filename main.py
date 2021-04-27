@@ -33,18 +33,26 @@ async def incoming_message(request: Request):
 
     whatsapp_requests.insert_one(incoming_message)
 
+    message = incoming_message["Body"]
+    # example_message = "MUM - Oxygen"
+    filters = message.split('-')
+    city = filters[0].strip()
+    resource = filters[1].strip()
+
+    cursor = leads.find({ 'region': city, 'resource': resource }).limit(5)
+
+    lead_str = ""
+    for index, item in enumerate(cursor):
+        lead_str += """
+        {}. {}
+        Contact: +91 {}
+        """.format(index+1, item["name"], item["contact_number"])
+
+
     message_body = """
-    The following leads are available in Mumbai for Oxygen:
-
-    1. Oxygen Services
-    Contact: +91 9823656281
-
-    2. HelpNow
-    Contact: +91 8822288222
-
-    3. Hemkunt Foundation
-    Contact: +91 9899930828
-    """
+    The following leads are available in {} for {}:
+    {}
+    """.format(city, resource, lead_str)
 
     # Reponse for Whatsapp
     wa_response = {
