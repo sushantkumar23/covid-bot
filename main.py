@@ -24,7 +24,7 @@ def hello_world():
     return "Hello World", 200
 
 
-@app.post("/incoming_message")
+@app.post("/incoming_message", status_code=201)
 async def incoming_message(request: Request):
 
     form_data = await request.form()
@@ -35,24 +35,37 @@ async def incoming_message(request: Request):
 
     message = incoming_message["Body"]
     # example_message = "MUM - Oxygen"
-    filters = message.split('-')
-    city = filters[0].strip()
-    resource = filters[1].strip()
 
-    cursor = leads.find({ 'region': city, 'resource': resource }).limit(5)
+    try:
+        filters = message.split('-')
+        city = filters[0].strip()
+        resource = filters[1].strip()
+        db_filter = {
+            'region': city,
+            'resource': resource
+        }
 
-    lead_str = ""
-    for index, item in enumerate(cursor):
-        lead_str += """
-        {}. {}
-        Contact: +91 {}
-        """.format(index+1, item["name"], item["contact_number"])
+        # Check if there are any results for this search; if not then throw exception
+        count = leads.count_documents(db_filter)
+        if count == 0:
+            raise Exception("No item found")
 
+        # If results are non-zero then go ahead
+        cursor = leads.find(db_filter).limit(5)
+        lead_str = ""
+        for index, item in enumerate(cursor):
+            lead_str += """
+            {}. {}
+            Contact: +91 {}
+            """.format(index+1, item["name"], item["contact_number"])
 
-    message_body = """
-    The following leads are available in {} for {}:
-    {}
-    """.format(city, resource, lead_str)
+        message_body = """
+        The following leads are available in {} for {}:
+        {}
+        """.format(city, resource, lead_str)
+
+    except Exception as e:
+        message_body = "Either your search format was invalid or we could not find any results for your search."
 
     # Reponse for Whatsapp
     wa_response = {
@@ -72,6 +85,6 @@ async def incoming_message(request: Request):
 
 
 @app.post("/status")
-def status(request):
+def status(request: Request):
     request_status = request.values.get("Body", '')
     print(request_status)
