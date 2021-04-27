@@ -8,7 +8,7 @@ app = FastAPI()
 
 account_sid = os.getenv("ACCOUNT_SID")
 auth_token = os.getenv("AUTH_TOKEN")
-MONGODB_URI = os.getenv('MONGODB_URI')
+MONGO_URI = os.getenv('MONGO_URI')
 
 client = Client(account_sid, auth_token)
 
