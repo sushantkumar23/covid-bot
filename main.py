@@ -17,7 +17,7 @@ def hello_world():
 
 
 @app.post("/incoming_message")
-def incoming_message(request: Request):
+async def incoming_message(request: Request):
     print(type(request))
     print(dir(request))
     print(request.values())
