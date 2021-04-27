@@ -11,7 +11,9 @@ client = Client(account_sid, auth_token)
 
 
 @app.get("/")
+def hello_world():
     return "Hello World", 200
+
 
 @app.post("/incoming_message")
 def incoming_message(request: Request):
@@ -24,6 +26,7 @@ def incoming_message(request: Request):
         to='whatsapp:+919619446401'
     )
     print(message.sid)
+
 
 @app.post("/status")
 def status(request):
