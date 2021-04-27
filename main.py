@@ -38,7 +38,7 @@ async def incoming_message(request: Request):
 
     try:
         filters = message.split('-')
-        city = filters[0].strip()
+        city = filters[0].strip().upper()
         resource = filters[1].strip()
         db_filter = {
             'region': city,
