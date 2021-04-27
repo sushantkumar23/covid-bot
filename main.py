@@ -21,6 +21,8 @@ def incoming_message(request: Request):
     print(type(request))
     print(dir(request))
     print(request.values())
+    print(type(request.form))
+    print(request.form)
     incoming_msg = request.values.get('Body', '').lower()
     print("Incoming message: {}".format(incoming_msg))
 
