@@ -1,4 +1,5 @@
 # main.py
+import pymongo
 import os
 from fastapi import FastAPI, Request
 from twilio.rest import Client
@@ -17,9 +18,12 @@ def hello_world():
 
 @app.post("/incoming_message")
 def incoming_message(request: Request):
+    print(type(request))
+    print(dir(request))
+    print(request.values())
     incoming_msg = request.values.get('Body', '').lower()
-
     print("Incoming message: {}".format(incoming_msg))
+
     message = client.messages.create(
         from_='whatsapp:+14155238886',
         body='The following leads are available in Mumbai for Oxygen cylinders:',
