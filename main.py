@@ -10,6 +10,7 @@ app = FastAPI()
 # account_sid = os.getenv("ACCOUNT_SID")
 # auth_token = os.getenv("AUTH_TOKEN")
 MONGO_URI = os.getenv('MONGO_URI')
+NUM_LEADS = 5
 
 # client = Client(account_sid, auth_token)
 
@@ -35,10 +36,14 @@ async def handle_request(request: Request):
     whatsapp_requests.insert_one(incoming_message)
 
     message = incoming_message["Body"]
-    # example_message = "MUM - Oxygen"
+    # example_message = "MUM - Oxygen", "MUM Oxygen"
 
     try:
-        filters = message.split('-')
+        if "-" in message:
+            filters = message.split('-')
+        else:
+            filters = message.split(' ')
+
         city = filters[0].strip().upper()
         resource = filters[1].strip().lower()
         db_filter = {
@@ -52,7 +57,7 @@ async def handle_request(request: Request):
             raise Exception("No item found")
 
         # If results are non-zero then go ahead
-        cursor = leads.find(db_filter).limit(5).sort("_id", -1)
+        cursor = leads.find(db_filter).limit(NUM_LEADS).sort("_id", -1)
         lead_str = ""
         for index, item in enumerate(cursor):
             lead_str += """
@@ -61,13 +66,13 @@ async def handle_request(request: Request):
             """.format(index + 1, item["name"], item["contact_number"])
         cursor.close()
 
-        # Look for nearby cities if less than 5 leads
-        if count < 5:
+        # Look for nearby cities if number of leads less than NUM_LEADS
+        if count < NUM_LEADS:
             nearby_city_filter = {
-                'region': {'$in': [city]},
+                'nearby_regions': {'$in': [city]},
                 'resource': resource
             }
-            cursor = leads.find(nearby_city_filter).limit(5 - count).sort("_id", -1)
+            cursor = leads.find(nearby_city_filter).limit(NUM_LEADS - count).sort("_id", -1)
             for index, item in enumerate(cursor):
                 lead_str += """
                 {}. {}
