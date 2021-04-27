@@ -29,21 +29,28 @@ async def incoming_message(request: Request):
 
     form_data = await request.form()
     incoming_message = dict(form_data)
-    print("type of incoming_message: {}".format(type(incoming_message)))
-    print("incoming_message: {}".format(incoming_message))
+    print("incoming_request: {}".format(incoming_message))
 
     whatsapp_requests.insert_one(incoming_message)
 
-    try:
-        print("Incoming message: {}".format(incoming_message["message"]))
-    except Exception as e:
-        print(e)
+    message_body = """
+    The following leads are available in Mumbai for Oxygen:
+
+    1. Oxygen Services
+    Contact: +91 9823656281
+
+    2. HelpNow
+    Contact: +91 8822288222
+
+    3. Hemkunt Foundation
+    Contact: +91 9899930828
+    """
 
     # Reponse for Whatsapp
     wa_response = {
         "from": "whatsapp:+14155238886",
-        "to": "whatsapp:+919619446401",
-        "body": "The following leads are available in Mumbai for Oxygen cylinders:"
+        "to": incoming_message["From"],
+        "body": message_body
     }
 
     message = client.messages.create(
