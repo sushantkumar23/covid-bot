@@ -145,7 +145,7 @@ Any leads you share can help save many lives 🙏. Please join us to help India 
     # Insert into the database for logging
     whatsapp_responses.insert_one(wa_response)
 
-    return str(resp)
+    return "success"
 
 
 @app.post("/status")
