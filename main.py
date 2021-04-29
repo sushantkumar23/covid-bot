@@ -12,6 +12,7 @@ account_sid = os.getenv("ACCOUNT_SID")
 auth_token = os.getenv("AUTH_TOKEN")
 MONGO_URI = os.getenv('MONGO_URI')
 NUM_LEADS = 5
+NUM_IND_LEADS = 5
 
 client = Client(account_sid, auth_token)
 
@@ -57,6 +58,23 @@ Any leads you share can help save many lives 🙏. Please join us to help India 
 """.format(instructions)
 
 
+def build_msg(item, lead_idx):
+    contact_line = ""
+    url_line = ""
+    if item["contact_number"] != "":
+        contact_line = "\nContact: {}".format(item["contact_number"])
+    url = item["url"]
+    if url != "":
+        url = url.replace('https://', '')
+        url = url.replace('http://', '')
+        url = url.replace('www.', '')
+        url_line = "\n{}".format(url)
+    retval = """
+{}. {} {} {}
+            """.format(lead_idx, item["name"], contact_line, url_line)
+    return retval
+
+
 @app.get("/")
 def hello_world():
     return "Hello World", 200
@@ -80,6 +98,8 @@ async def handle_request(request: Request):
         else:
             filters = message.split(' ')
 
+        lead_idx = 1
+
         city = filters[0].strip().upper()
         resource = filters[1].strip().lower()
         db_filter = {
@@ -97,19 +117,8 @@ async def handle_request(request: Request):
         lead_str = ""
 
         for index, item in enumerate(cursor):
-            contact_line = ""
-            url_line = ""
-            if item["contact_number"] != "":
-                contact_line = "\nContact: {}".format(item["contact_number"])
-            url = item["url"]
-            if url != "":
-                url = url.replace('https://', '')
-                url = url.replace('http://', '')
-                url = url.replace('www.', '')
-                url_line = "\n{}".format(url)
-            lead_str += """
-{}. {} {} {}
-            """.format(index + 1, item["name"], contact_line, url_line)
+            lead_str += build_msg(item, lead_idx)
+            lead_idx += 1
         cursor.close()
 
         # Look for nearby cities if number of leads less than NUM_LEADS
@@ -120,11 +129,20 @@ async def handle_request(request: Request):
             }
             cursor = leads.find(nearby_city_filter).limit(NUM_LEADS - count).sort("_id", -1)
             for index, item in enumerate(cursor):
-                lead_str += """
-                {}. {}
-                Contact: +91 {}
-                """.format(index + 1 + count, item["name"], item["contact_number"])
+                lead_str += build_msg(item, lead_idx)
+                lead_idx += 1
             cursor.close()
+
+        # Look for all india leads
+        india_leads = {
+            'region': "IND",
+            'resource': resource
+        }
+        cursor = leads.find(india_leads).limit(NUM_IND_LEADS).sort("_id", -1)
+        for index, item in enumerate(cursor):
+            lead_str += build_msg(item, lead_idx)
+            lead_idx += 1
+        cursor.close()
 
         message_body = """
         The following leads are available in {} for {}:
