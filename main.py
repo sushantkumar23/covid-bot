@@ -27,7 +27,7 @@ instructions = """
 Resources available:
 
 1. Oxygen - 💨
-2. Hospital Beds - 🛏
+2. Beds - 🛏
 3. Injections - 💉
 4. Ambulance - 🚑
 5. Helpline - ☎️
