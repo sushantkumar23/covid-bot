@@ -94,12 +94,16 @@ async def handle_request(request: Request):
 
     try:
         if "-" in message:
-            filters = message.split('-')
+            msg_parts = message.split('-')
         else:
-            filters = message.split(' ')
+            msg_parts = message.split(' ')
 
         lead_idx = 0
+        filters = []
 
+        for msg_part in msg_parts:
+            if msg_part != '':
+                filters.append(msg_part)
         city = filters[0].strip().upper()
         resource = filters[1].strip().lower()
         db_filter = {
