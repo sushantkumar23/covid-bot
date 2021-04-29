@@ -8,12 +8,9 @@ from twilio.twiml.messaging_response import MessagingResponse
 
 app = FastAPI()
 
-# account_sid = os.getenv("ACCOUNT_SID")
-# auth_token = os.getenv("AUTH_TOKEN")
-# MONGO_URI = os.getenv('MONGO_URI')
-account_sid = "AC1729a2f8acf41ed7ff5ab9f8ccc5e1ad"
-auth_token = "fcdce3c10d49adb08f53054b301e18e9"
-MONGO_URI = "mongodb+srv://devUser:avilash%40123@devcluster.gltxb.mongodb.net/covidbot?retryWrites=true&w=majority"
+account_sid = os.getenv("ACCOUNT_SID")
+auth_token = os.getenv("AUTH_TOKEN")
+MONGO_URI = os.getenv('MONGO_URI')
 NUM_LEADS = 5
 
 client = Client(account_sid, auth_token)
