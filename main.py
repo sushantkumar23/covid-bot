@@ -98,7 +98,7 @@ async def handle_request(request: Request):
         else:
             filters = message.split(' ')
 
-        lead_idx = 1
+        lead_idx = 0
 
         city = filters[0].strip().upper()
         resource = filters[1].strip().lower()
@@ -109,16 +109,14 @@ async def handle_request(request: Request):
 
         # Check if there are any results for this search; if not then throw exception
         count = leads.count_documents(db_filter)
-        if count == 0:
-            raise Exception("No item found")
 
         # If results are non-zero then go ahead
         cursor = leads.find(db_filter).limit(NUM_LEADS).sort("_id", -1)
         lead_str = ""
 
         for index, item in enumerate(cursor):
-            lead_str += build_msg(item, lead_idx)
             lead_idx += 1
+            lead_str += build_msg(item, lead_idx)
         cursor.close()
 
         # Look for nearby cities if number of leads less than NUM_LEADS
@@ -129,8 +127,8 @@ async def handle_request(request: Request):
             }
             cursor = leads.find(nearby_city_filter).limit(NUM_LEADS - count).sort("_id", -1)
             for index, item in enumerate(cursor):
-                lead_str += build_msg(item, lead_idx)
                 lead_idx += 1
+                lead_str += build_msg(item, lead_idx)
             cursor.close()
 
         # Look for all india leads
@@ -140,8 +138,8 @@ async def handle_request(request: Request):
         }
         cursor = leads.find(india_leads).limit(NUM_IND_LEADS).sort("_id", -1)
         for index, item in enumerate(cursor):
-            lead_str += build_msg(item, lead_idx)
             lead_idx += 1
+            lead_str += build_msg(item, lead_idx)
         cursor.close()
 
         message_body = """
@@ -149,13 +147,20 @@ async def handle_request(request: Request):
         {}
         """.format(city, resource, lead_str)
 
+        if lead_idx == 0:
+            message_body = """
+*Sorry, no results.*
+Please follow the instructions below
+{}
+                        """.format(instructions)
+
     except Exception as e:
         print(e)
         if prev_message_count == 0:
             message_body = onboard_msg
         else:
             message_body = """
-*Either your search format was invalid or we could not find any results for your search.*
+*Invalid search format!*
 Please follow the instructions below
 {}
             """.format(instructions)
