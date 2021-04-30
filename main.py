@@ -15,7 +15,7 @@ account_sid = os.getenv("ACCOUNT_SID")
 auth_token = os.getenv("AUTH_TOKEN")
 MONGO_URI = os.getenv('MONGO_URI')
 DEV = os.getenv("DEV")
-if DEV == "":
+if DEV is None:
     DEV = False
 else:
     DEV = True
