@@ -1,8 +1,11 @@
 import os
 import re
+import numpy as np
+import random, string
 from pymongo import MongoClient
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from twilio.rest import Client
+from leven import levenshtein
 from twilio.twiml.messaging_response import MessagingResponse
 
 
@@ -11,6 +14,11 @@ app = FastAPI()
 account_sid = os.getenv("ACCOUNT_SID")
 auth_token = os.getenv("AUTH_TOKEN")
 MONGO_URI = os.getenv('MONGO_URI')
+DEV = os.getenv("DEV")
+if DEV == "":
+    DEV = False
+else:
+    DEV = True
 NUM_LEADS = 5
 NUM_IND_LEADS = 5
 
@@ -22,6 +30,9 @@ db = mongo_client.get_database()
 leads = db['leads']
 whatsapp_requests = db['whatsapp_requests']
 whatsapp_responses = db['whatsapp_responses']
+
+all_regions = []
+all_resources = ["oxygen", "beds", "injections", "ambulance", "helpline", "plasma"]
 
 instructions = """
 Resources available:
@@ -58,6 +69,10 @@ Any leads you share can help save many lives 🙏. Please join us to help India 
 """.format(instructions)
 
 
+def generate_transaction_id():
+    return ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(32))
+
+
 def build_msg(item, lead_idx):
     contact_line = ""
     url_line = ""
@@ -75,24 +90,10 @@ def build_msg(item, lead_idx):
     return retval
 
 
-@app.get("/")
-def hello_world():
-    return "Hello World", 200
-
-
-@app.post("/incoming_message", status_code=201)
-async def handle_request(request: Request):
-    form_data = await request.form()
-    incoming_message = dict(form_data)
-    print("incoming_request: {}".format(incoming_message))
-
-    prev_message_count = whatsapp_requests.count_documents({'From': incoming_message['From']})
-    whatsapp_requests.insert_one(incoming_message)
-
-    message = incoming_message["Body"]
-    # example_message = "MUM - Oxygen", "MUM Oxygen"
-
+def handle_message(message, user):
     try:
+        prev_message_count = whatsapp_requests.count_documents({'From': user})
+
         if "-" in message:
             msg_parts = message.split('-')
         else:
@@ -105,7 +106,13 @@ async def handle_request(request: Request):
             if msg_part != '':
                 filters.append(msg_part)
         city = filters[0].strip().upper()
-        resource = filters[1].strip().lower()
+        input_resource = filters[1].strip().lower()
+        lev_scores = [levenshtein(res, input_resource) for res in all_resources]
+        min_pos = np.argmin(np.array(lev_scores))
+        if lev_scores[min_pos] < 4:
+            resource = all_resources[min_pos]
+        else:
+            raise Exception("Invalid resource")
         db_filter = {
             'region': city,
             'resource': resource
@@ -146,17 +153,17 @@ async def handle_request(request: Request):
             lead_str += build_msg(item, lead_idx)
         cursor.close()
 
-        message_body = """
-        The following leads are available in {} for {}:
-        {}
-        """.format(city, resource, lead_str)
-
         if lead_idx == 0:
             message_body = """
 *Sorry, no results.*
 Please follow the instructions below
 {}
-                        """.format(instructions)
+                            """.format(instructions)
+        else:
+            message_body = """
+The following leads are available in {} for {}:
+{}
+                            """.format(city, resource, lead_str)
 
     except Exception as e:
         print(e)
@@ -167,29 +174,59 @@ Please follow the instructions below
 *Invalid search format!*
 Please follow the instructions below
 {}
-            """.format(instructions)
+                """.format(instructions)
 
-    # Reponse for Whatsapp
+    return message_body
+
+
+@app.get("/")
+def hello_world():
+    return "Hello World", 200
+
+
+@app.post("/incoming_message", status_code=201)
+async def handle_request(request: Request):
+    form_data = await request.form()
+    incoming_message = dict(form_data)
+    print("incoming_request: {}".format(incoming_message))
+    transaction_id = generate_transaction_id()
+
+    if not DEV:
+        incoming_message["transaction_id"] = transaction_id
+        whatsapp_requests.insert_one(incoming_message)
+
+    message = incoming_message["Body"]
+    user = incoming_message["From"]
+
+    message_body = handle_message(message, user)
+
+    if DEV:
+        print(message_body)
+
+    # Build Response
     wa_response = {
         "from": "whatsapp:+14155238886",
-        "to": incoming_message["From"],
-        "body": message_body
+        "to": user,
+        "body": message_body,
+        "transaction_id": transaction_id
     }
+    resp = MessagingResponse()
+    msg = resp.message()
+    msg.body(message_body)
 
-    message = client.messages.create(
-        from_=wa_response["from"],
-        body=wa_response["body"],
-        to=wa_response["to"]
-    )
-    print(message.sid)
-    # resp = MessagingResponse()
-    # msg = resp.message()
-    # msg.body(message_body)
+    if not DEV:
+        # Insert into the database for logging
+        whatsapp_responses.insert_one(wa_response)
 
-    # Insert into the database for logging
-    whatsapp_responses.insert_one(wa_response)
+        # Send Response
+        # message = client.messages.create(
+        #     from_=wa_response["from"],
+        #     body=wa_response["body"],
+        #     to=wa_response["to"]
+        # )
+        # print(message.sid)
 
-    return "success"
+    return Response(content=str(resp), media_type="application/xml")
 
 
 @app.post("/status")
