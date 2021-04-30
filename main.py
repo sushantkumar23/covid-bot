@@ -8,11 +8,8 @@ from twilio.rest import Client
 from leven import levenshtein
 from twilio.twiml.messaging_response import MessagingResponse
 
-
 app = FastAPI()
 
-account_sid = os.getenv("ACCOUNT_SID")
-auth_token = os.getenv("AUTH_TOKEN")
 MONGO_URI = os.getenv('MONGO_URI')
 DEV = os.getenv("DEV")
 if DEV is None:
@@ -21,8 +18,6 @@ else:
     DEV = True
 NUM_LEADS = 5
 NUM_IND_LEADS = 5
-
-client = Client(account_sid, auth_token)
 
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client.get_database()
@@ -73,9 +68,18 @@ def generate_transaction_id():
     return ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(32))
 
 
+def suffix(d):
+    return 'th' if 11 <= d <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(d % 10, 'th')
+
+
+def custom_strftime(time_format, t):
+    return t.strftime(time_format).replace('{S}', str(t.day) + suffix(t.day))
+
+
 def build_msg(item, lead_idx):
     contact_line = ""
     url_line = ""
+    last_verified_line = ""
     if item["contact_number"] != "":
         contact_line = "\nContact: {}".format(item["contact_number"])
     url = item["url"]
@@ -84,16 +88,20 @@ def build_msg(item, lead_idx):
         url = url.replace('http://', '')
         url = url.replace('www.', '')
         url_line = "\n{}".format(url)
+    if "last_verified" in item:
+        last_verified = item["last_verified"]
+        if last_verified != "":
+            last_verified_str = custom_strftime('%B {S}, %Y', last_verified)
+            last_verified_line = "\n_Last verified: {}_".format(last_verified_str)
     retval = """
-{}. {} {} {}
-            """.format(lead_idx, item["name"], contact_line, url_line)
+{}. {} {} {} {}
+            """.format(lead_idx, item["name"], contact_line, url_line, last_verified_line)
     return retval
 
 
 def handle_message(message, user):
+    prev_message_count = whatsapp_requests.count_documents({'From': user})
     try:
-        prev_message_count = whatsapp_requests.count_documents({'From': user})
-
         if "-" in message:
             msg_parts = message.split('-')
         else:
@@ -217,14 +225,6 @@ async def handle_request(request: Request):
     if not DEV:
         # Insert into the database for logging
         whatsapp_responses.insert_one(wa_response)
-
-        # Send Response
-        # message = client.messages.create(
-        #     from_=wa_response["from"],
-        #     body=wa_response["body"],
-        #     to=wa_response["to"]
-        # )
-        # print(message.sid)
 
     return Response(content=str(resp), media_type="application/xml")
 
