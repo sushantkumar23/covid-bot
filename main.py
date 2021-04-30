@@ -91,7 +91,7 @@ def build_msg(item, lead_idx):
     if "last_verified" in item:
         last_verified = item["last_verified"]
         if last_verified != "":
-            last_verified_str = custom_strftime('%B {S}, %Y', last_verified)
+            last_verified_str = custom_strftime('%B {S}', last_verified)
             last_verified_line = "\n_Last verified: {}_".format(last_verified_str)
     retval = """
 {}. {} {} {} {}
