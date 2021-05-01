@@ -1,18 +1,19 @@
 import os
+
+from fastapi import FastAPI, Request, Response
 from pymongo import MongoClient
-from fastapi import FastAPI, Request
-from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 
+from dto.leads_manager import LeadsManager
+from helper import Helper
+from request_message import RequestMessage
 
 app = FastAPI()
 
-account_sid = os.getenv("ACCOUNT_SID")
-auth_token = os.getenv("AUTH_TOKEN")
 MONGO_URI = os.getenv('MONGO_URI')
+DEV = bool(os.getenv("DEV"))  # any truthy value is True, falsy is False
 NUM_LEADS = 5
-
-client = Client(account_sid, auth_token)
+NUM_IND_LEADS = 5
 
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client.get_database()
@@ -20,6 +21,61 @@ db = mongo_client.get_database()
 leads = db['leads']
 whatsapp_requests = db['whatsapp_requests']
 whatsapp_responses = db['whatsapp_responses']
+
+
+def handle_message(message: str, user):
+    prev_message_count = whatsapp_requests.count_documents({'From': user})
+    try:
+        req_msg = RequestMessage(message)
+        if req_msg.is_help_message:
+            return f'Please follow the instructions below\n{Helper.instructions}'
+
+        db_filter = {
+            'region': req_msg.city,
+            'resource': req_msg.resource
+        }
+
+        # Check if there are any results for this search; if not then throw exception
+        count = leads.count_documents(db_filter)
+
+        # If results are non-zero then go ahead
+        cursor = leads.find(db_filter).limit(NUM_LEADS).sort("_id", -1)
+        leads_manager = LeadsManager(cursor)
+        cursor.close()
+
+        # Look for nearby cities if number of leads less than NUM_LEADS
+        if count < NUM_LEADS:
+            nearby_city_filter = {
+                'nearby_regions': {'$in': [req_msg.city]},
+                'resource': req_msg.resource
+            }
+            cursor = leads.find(nearby_city_filter).limit(NUM_LEADS - count).sort("_id", -1)
+            leads_manager.add_leads(cursor)
+            cursor.close()
+
+        # Look for all india leads
+        india_leads = {
+            'region': "IND",
+            'resource': req_msg.resource
+        }
+        cursor = leads.find(india_leads).limit(NUM_IND_LEADS).sort("_id", -1)
+        leads_manager.add_leads(cursor)
+        cursor.close()
+
+        if leads_manager.is_empty():
+            message_body = f"*Sorry, no results.*\nPlease follow the instructions below\n{Helper.instructions}"
+        else:
+            message_body = f"The following leads are available in {req_msg.city} for {req_msg.resource}:" \
+                           f"{leads_manager.leads_str()}"
+
+    except Exception as e:
+        print(e)
+        if prev_message_count == 0:
+            message_body = Helper.onboard_msg
+        else:
+            message_body = f"*Invalid search format!*\nPlease follow the instructions below {Helper.instructions}"
+
+    return message_body
 
 
 @app.get("/")
@@ -32,120 +88,36 @@ async def handle_request(request: Request):
     form_data = await request.form()
     incoming_message = dict(form_data)
     print("incoming_request: {}".format(incoming_message))
+    transaction_id = Helper.generate_transaction_id()
 
-    prev_message_count = whatsapp_requests.count_documents({'From': incoming_message['From']})
-    whatsapp_requests.insert_one(incoming_message)
+    if not DEV:
+        incoming_message["transaction_id"] = transaction_id
+        whatsapp_requests.insert_one(incoming_message)
 
-    # If this is the first message sent by the user then send him the introductory
-    # message
-    if prev_message_count == 0:
-        message_body = """
-Hi! I’m Covid-INDIA Bot🤖
+    message = incoming_message["Body"]
+    user = incoming_message["From"]
 
-Here to assist with some relevant leads in this distressful times. Stay hopeful 🤞🏻
+    message_body = handle_message(message, user)
 
-Resources available:
+    if DEV:
+        print(message_body)
 
-1. Oxygen - 💨
-2. Hospital Beds - 🛏
-3. Injections - 💉
-4. Ambulance - 🚑
-5. Helpline - ☎️
-6. Plasma - 🩸
-
-Locations covered:
-
-· Mumbai (MUM) · Delhi (DEL) · Bangalore (BLR) · Chennai (CHE) · Kolkata (KOL) · Pune (PUN) · Nagpur (NAG) · Lucknow (LUK) · Ahmedabad (AMD) · Gurgaon (GGN)
-
-If you are looking for Oxygen in Mumbai then reply with the following message (NOT case sensitive):
-
-MUM Oxygen Or MUM 1 Or *<city-code> <resource name or id>*
-
-I’ll get back with the best information available. Take care! 🙏
-
-------------------------- IMPORTANT ------------------------------
-In case you have any verified contacts you would like to share, please send a message in the following format:
-
-For a plasma donor in Mumbai, please reply SEND-MUM-6-Name-Contact
-
-Any leads you share can help save many lives 🙏. Please join us to help India fight back Coronavirus 🦠
-"""
-    else:
-        message = incoming_message["Body"]
-        # example_message = "MUM - Oxygen", "MUM Oxygen"
-
-        try:
-            if "-" in message:
-                filters = message.split('-')
-            else:
-                filters = message.split(' ')
-
-            city = filters[0].strip().upper()
-            resource = filters[1].strip().lower()
-            db_filter = {
-                'region': city,
-                'resource': resource
-            }
-
-            # Check if there are any results for this search; if not then throw exception
-            count = leads.count_documents(db_filter)
-            if count == 0:
-                raise Exception("No item found")
-
-            # If results are non-zero then go ahead
-            cursor = leads.find(db_filter).limit(NUM_LEADS).sort("_id", -1)
-            lead_str = ""
-            for index, item in enumerate(cursor):
-                lead_str += """
-                {}. {}
-                Contact: +91 {}
-                """.format(index + 1, item["name"], item["contact_number"])
-            cursor.close()
-
-            # Look for nearby cities if number of leads less than NUM_LEADS
-            if count < NUM_LEADS:
-                nearby_city_filter = {
-                    'nearby_regions': {'$in': [city]},
-                    'resource': resource
-                }
-                cursor = leads.find(nearby_city_filter).limit(NUM_LEADS - count).sort("_id", -1)
-                for index, item in enumerate(cursor):
-                    lead_str += """
-                    {}. {}
-                    Contact: +91 {}
-                    """.format(index + 1 + count, item["name"], item["contact_number"])
-                cursor.close()
-
-            message_body = """
-            The following leads are available in {} for {}:
-            {}
-            """.format(city, resource, lead_str)
-
-        except Exception as e:
-            print(e)
-            message_body = "Either your search format was invalid or we could not find any results for your search."
-
-    # Reponse for Whatsapp
+    # Build Response
     wa_response = {
         "from": "whatsapp:+14155238886",
-        "to": incoming_message["From"],
-        "body": message_body
+        "to": user,
+        "body": message_body,
+        "transaction_id": transaction_id
     }
+    resp = MessagingResponse()
+    msg = resp.message()
+    msg.body(message_body)
 
-    message = client.messages.create(
-        from_=wa_response["from"],
-        body=wa_response["body"],
-        to=wa_response["to"]
-    )
-    print(message.sid)
-    # resp = MessagingResponse()
-    # msg = resp.message()
-    # msg.body(message_body)
+    if not DEV:
+        # Insert into the database for logging
+        whatsapp_responses.insert_one(wa_response)
 
-    # Insert into the database for logging
-    whatsapp_responses.insert_one(wa_response)
-
-    return "success"
+    return Response(content=str(resp), media_type="application/xml")
 
 
 @app.post("/status")
