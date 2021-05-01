@@ -1,21 +1,17 @@
 import os
-import re
-import numpy as np
-import random, string
-from pymongo import MongoClient
+
 from fastapi import FastAPI, Request, Response
-from twilio.rest import Client
-from leven import levenshtein
+from pymongo import MongoClient
 from twilio.twiml.messaging_response import MessagingResponse
+
+from dto.leads_manager import LeadsManager
+from helper import Helper
+from request_message import RequestMessage
 
 app = FastAPI()
 
 MONGO_URI = os.getenv('MONGO_URI')
-DEV = os.getenv("DEV")
-if DEV is None:
-    DEV = False
-else:
-    DEV = True
+DEV = bool(os.getenv("DEV"))  # any truthy value is True, falsy is False
 NUM_LEADS = 5
 NUM_IND_LEADS = 5
 
@@ -26,104 +22,17 @@ leads = db['leads']
 whatsapp_requests = db['whatsapp_requests']
 whatsapp_responses = db['whatsapp_responses']
 
-all_regions = []
-all_resources = ["oxygen", "beds", "injections", "ambulance", "helpline", "plasma"]
 
-instructions = """
-Resources available:
-
-1. Oxygen - 💨
-2. Beds - 🛏
-3. Injections - 💉
-4. Ambulance - 🚑
-5. Helpline - ☎️
-6. Plasma - 🩸
-
-Locations covered:
-
-· Mumbai (MUM) · Delhi (DEL) · Bangalore (BLR) · Chennai (CHE) · Kolkata (KOL) · Pune (PUN) · Lucknow (LUK) · Ahmedabad (AMD) · Gurgaon (GGN)
-
-If you are looking for Oxygen in Mumbai then reply with the following message (NOT case sensitive): 
-
-MUM Oxygen
-"""
-
-onboard_msg = """
-Hi! I’m Covid-INDIA Bot🤖
-
-Here to assist with some relevant leads in this distressful times. Stay hopeful 🤞🏻
-{}
-I’ll get back with the best information available. Take care! 🙏
-
-* IMPORTANT *
-In case you have any verified contacts you would like to share, please send a message in the following format:
-
-For a plasma donor in Mumbai, please reply SEND MUM 6 Name Contact
-
-Any leads you share can help save many lives 🙏. Please join us to help India fight back Coronavirus 🦠
-""".format(instructions)
-
-
-def generate_transaction_id():
-    return ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(32))
-
-
-def suffix(d):
-    return 'th' if 11 <= d <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(d % 10, 'th')
-
-
-def custom_strftime(time_format, t):
-    return t.strftime(time_format).replace('{S}', str(t.day) + suffix(t.day))
-
-
-def build_msg(item, lead_idx):
-    contact_line = ""
-    url_line = ""
-    last_verified_line = ""
-    if item["contact_number"] != "":
-        contact_line = "\nContact: {}".format(item["contact_number"])
-    url = item["url"]
-    if url != "":
-        url = url.replace('https://', '')
-        url = url.replace('http://', '')
-        url = url.replace('www.', '')
-        url_line = "\n{}".format(url)
-    if "last_verified" in item:
-        last_verified = item["last_verified"]
-        if last_verified != "":
-            last_verified_str = custom_strftime('%B {S}', last_verified)
-            last_verified_line = "\n_Last verified: {}_".format(last_verified_str)
-    retval = """
-{}. {} {} {} {}
-            """.format(lead_idx, item["name"], contact_line, url_line, last_verified_line)
-    return retval
-
-
-def handle_message(message, user):
+def handle_message(message: str, user):
     prev_message_count = whatsapp_requests.count_documents({'From': user})
     try:
-        if "-" in message:
-            msg_parts = message.split('-')
-        else:
-            msg_parts = message.split(' ')
+        req_msg = RequestMessage(message)
+        if req_msg.is_help_message:
+            return f'Please follow the instructions below\n{Helper.instructions}'
 
-        lead_idx = 0
-        filters = []
-
-        for msg_part in msg_parts:
-            if msg_part != '':
-                filters.append(msg_part)
-        city = filters[0].strip().upper()
-        input_resource = filters[1].strip().lower()
-        lev_scores = [levenshtein(res, input_resource) for res in all_resources]
-        min_pos = np.argmin(np.array(lev_scores))
-        if lev_scores[min_pos] < 4:
-            resource = all_resources[min_pos]
-        else:
-            raise Exception("Invalid resource")
         db_filter = {
-            'region': city,
-            'resource': resource
+            'region': req_msg.city,
+            'resource': req_msg.resource
         }
 
         # Check if there are any results for this search; if not then throw exception
@@ -131,58 +40,40 @@ def handle_message(message, user):
 
         # If results are non-zero then go ahead
         cursor = leads.find(db_filter).limit(NUM_LEADS).sort("_id", -1)
-        lead_str = ""
-
-        for index, item in enumerate(cursor):
-            lead_idx += 1
-            lead_str += build_msg(item, lead_idx)
+        leads_manager = LeadsManager(cursor)
         cursor.close()
 
         # Look for nearby cities if number of leads less than NUM_LEADS
         if count < NUM_LEADS:
             nearby_city_filter = {
-                'nearby_regions': {'$in': [city]},
-                'resource': resource
+                'nearby_regions': {'$in': [req_msg.city]},
+                'resource': req_msg.resource
             }
             cursor = leads.find(nearby_city_filter).limit(NUM_LEADS - count).sort("_id", -1)
-            for index, item in enumerate(cursor):
-                lead_idx += 1
-                lead_str += build_msg(item, lead_idx)
+            leads_manager.add_leads(cursor)
             cursor.close()
 
         # Look for all india leads
         india_leads = {
             'region': "IND",
-            'resource': resource
+            'resource': req_msg.resource
         }
         cursor = leads.find(india_leads).limit(NUM_IND_LEADS).sort("_id", -1)
-        for index, item in enumerate(cursor):
-            lead_idx += 1
-            lead_str += build_msg(item, lead_idx)
+        leads_manager.add_leads(cursor)
         cursor.close()
 
-        if lead_idx == 0:
-            message_body = """
-*Sorry, no results.*
-Please follow the instructions below
-{}
-                            """.format(instructions)
+        if leads_manager.is_empty():
+            message_body = f"*Sorry, no results.*\nPlease follow the instructions below\n{Helper.instructions}"
         else:
-            message_body = """
-The following leads are available in {} for {}:
-{}
-                            """.format(city, resource, lead_str)
+            message_body = f"The following leads are available in {req_msg.city} for {req_msg.resource}:" \
+                           f"{leads_manager.leads_str()}"
 
     except Exception as e:
         print(e)
         if prev_message_count == 0:
-            message_body = onboard_msg
+            message_body = Helper.onboard_msg
         else:
-            message_body = """
-*Invalid search format!*
-Please follow the instructions below
-{}
-                """.format(instructions)
+            message_body = f"*Invalid search format!*\nPlease follow the instructions below {Helper.instructions}"
 
     return message_body
 
@@ -197,7 +88,7 @@ async def handle_request(request: Request):
     form_data = await request.form()
     incoming_message = dict(form_data)
     print("incoming_request: {}".format(incoming_message))
-    transaction_id = generate_transaction_id()
+    transaction_id = Helper.generate_transaction_id()
 
     if not DEV:
         incoming_message["transaction_id"] = transaction_id
